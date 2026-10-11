@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any, Callable, Self
 
 class Color(Enum):
-    NO_COLOR = 0b00
+    NO_COLOR = 0
     WHITE = -1
     BLACK =  1
 
@@ -23,6 +23,17 @@ class PieceType(Enum):
     KING     = "king"
     PAWN     = "pawn"
 
+
+# def invert_colors(surface):
+#     inv_surface = pg.Surface(surface.get_size())
+
+#     inv_surface.fill((255, 255, 255))
+
+#     inv_surface.blit(surface, (0, 0), special_flags=pg.BLEND_RGB_SUB)
+
+#     inv_surface.set_colorkey((255, 255, 255))
+
+#     return inv_surface
 
 class Piece:
     def __init__(self, piece_type: PieceType, color: Color):
@@ -119,13 +130,17 @@ class Piece:
 
         return moves, attacks
 
-    def draw(self, screen: pg.Surface, pos: tuple[float, float]):
+    def draw(self, screen: pg.Surface, center_pos: tuple[float, float]):
         if self.type == PieceType.NO_PIECE:
             return
 
         if self.surf is None:
             self.surf = pg.image.load(f"{str_for_color[self.color]}_{self.type.value}.png").convert_alpha()
+            if self.color == Color.BLACK and self.type == PieceType.PAWN:
+                print(self.surf.get_size())
 
+
+        pos = (center_pos[0] - self.surf.get_width()/2, center_pos[1] - self.surf.get_height()/2)
         screen.blit(self.surf, pos)
 
 NO_PIECE = Piece(PieceType.NO_PIECE, Color.NO_COLOR)
@@ -166,7 +181,7 @@ class Board:
         h = screen.get_height()
         for y in range(8):
             for x in range(8):
-                color = (255, 255, 255) if (x + y) % 2 == 0 else (0, 0, 0)
+                color = (240, 25, 55) if (x + y) % 2 == 0 else (0, 0, 0)
                 pg.draw.rect(screen, color, (x * w/8, y * h/8, w/8, h/8))
 
     def draw(self, screen: pg.Surface):
@@ -177,4 +192,37 @@ class Board:
             for x in range(8):
                 piece = self.layout[y][x]
                 if piece.type != PieceType.NO_PIECE:
-                    piece.draw(screen, (x * w/8, y * h/8))
+                    piece.draw(screen, (x * w/8 + w/16, y * h/8 + h/16))
+
+class Player:
+    def __init__(self, color: Color):
+        self.color = color
+
+    def get_move(self, board: Board) -> tuple[tuple[int, int], tuple[int, int]] | None:
+        raise NotImplementedError("This method should be implemented by subclasses")
+
+class Game:
+    def __init__(self, players: tuple[Player, Player]):
+        self.board = Board()
+        self.turn = Color.WHITE
+        self.players = {
+            Color.WHITE: players[0],
+            Color.BLACK: players[1],
+        }
+        self.board_surf = pg.Surface((800, 800))
+        self.redraw = True
+
+    def update(self):
+        player = self.players[self.turn]
+        move = player.get_move(self.board)
+        if move is not None:
+            old_pos, new_pos = move
+            self.board.make_move(old_pos, new_pos, self.turn)
+            self.turn = Color.BLACK if self.turn == Color.WHITE else Color.WHITE
+            self.redraw = True
+
+    def draw(self, screen: pg.Surface):
+        if self.redraw:
+            self.board.draw(self.board_surf)
+            self.redraw = False
+        screen.blit(self.board_surf, (0, 0))
