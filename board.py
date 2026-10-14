@@ -1,7 +1,8 @@
+from __future__ import annotations
 from pathlib import Path
 import itertools
 
-import pygame as pg
+import pygame as pg # pyright: ignore[reportMissingImports]
 import ctypes
 from enum import Enum
 from typing import Any, Callable, Self
@@ -53,7 +54,7 @@ class Piece:
         self.surf = None
         self.safe_moves = []
 
-    def check_safe_moves(self, board: list[list[Self]], pos: tuple[int, int], only_current = False) -> list[tuple[int, int]]:
+    def check_safe_moves(self, board: list[list["Piece"]], pos: tuple[int, int], only_current = False) -> list[tuple[int, int]]:
         """
         Function only to be called on a king to check which moves are safe
         """
@@ -92,14 +93,14 @@ class Piece:
 
         return safe_moves
 
-    def try_single_move(self, board: list[list[Self]], test_pos: tuple[int, int]):
+    def try_single_move(self, board: list[list["Piece"]], test_pos: tuple[int, int]):
         if not self.check_dim(test_pos) or board[test_pos[1]][test_pos[0]].color == self.color:
             return None, None
         if board[test_pos[1]][test_pos[0]].color.value == -self.color.value:
             return None, test_pos
         return test_pos, None
 
-    def try_linear_moves(self, board: list[list[Self]], pos: tuple[int, int], diff: tuple[int, int]):
+    def try_linear_moves(self, board: list[list["Piece"]], pos: tuple[int, int], diff: tuple[int, int]):
         moves:   list[tuple[int, int]] = []
         attacks: list[tuple[int, int]] = []
 
@@ -141,7 +142,7 @@ class Piece:
     def check_dim(self, pos: tuple[int, int]):
         return 8 > pos[0] >= 0 and 8 > pos[1] >= 0
 
-    def get_legal_moves(self, board: list[list[Self]], pos: tuple[int, int], *, king_data: tuple[Self, tuple[int, int]] | None = None, reverse_as: PieceType | None = None):
+    def get_legal_moves(self, board: list[list["Piece"]], pos: tuple[int, int], *, king_data: tuple["Piece", tuple[int, int]] | None = None, reverse_as: PieceType | None = None):
         """
         Returns (legal moves, legal attacks) for this piece at the given position
         """
@@ -327,7 +328,9 @@ class Game:
                     if piece.type == PieceType.KING and piece.color == self.turn:
                         king = piece
                         king_pos = (x, y)
-            king.safe_moves = king.check_safe_moves(self.board.layout, king_pos)
+            if king is not None:
+                assert(king_pos)
+                king.safe_moves = king.check_safe_moves(self.board.layout, king_pos)
             old_pos, new_pos = move
             if not self.board.layout[old_pos[1]][old_pos[0]].check_dim(old_pos) or not self.board.layout[new_pos[1]][new_pos[0]].check_dim(new_pos):
                 raise(ValueError("Move out of bounds"))
@@ -335,7 +338,7 @@ class Game:
             if self.board.layout[old_pos[1]][old_pos[0]].color != self.turn:
                 print(f"Wrong color: {self.board.layout[old_pos[1]][old_pos[0]].color} vs {self.turn}")
                 return
-            if new_pos not in self.board.layout[old_pos[1]][old_pos[0]].get_legal_moves(self.board.layout, old_pos, king_data=(king, king_pos))[int(target_color != Color.NO_COLOR)]:
+            if new_pos not in self.board.layout[old_pos[1]][old_pos[0]].get_legal_moves(self.board.layout, old_pos, king_data=((king, king_pos) if king and king_pos else None))[int(target_color != Color.NO_COLOR)]:
                 print(f"Illegal move: {old_pos} to {new_pos}")
                 return
             self.board.make_move(old_pos, new_pos, self.turn)

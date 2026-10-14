@@ -1,4 +1,4 @@
-import pygame as pg
+import pygame as pg # pyright: ignore[reportMissingImports]
 from board import Board, Game, PieceType, Color, Piece, Player
 
 class HumanPlayer(Player):
@@ -45,7 +45,8 @@ while running:
             case pg.MOUSEBUTTONDOWN:
                 print(game.turn)
                 print(game.players[game.turn])
-                game.players[game.turn].click(event.pos)
+                if isinstance(game.players[game.turn], HumanPlayer):
+                    game.players[game.turn].click(event.pos) # pyright: ignore[reportAttributeAccessIssue]
             case _:
                 pass
 
