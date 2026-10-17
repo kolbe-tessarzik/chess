@@ -40,6 +40,8 @@ class BotPlayer(chess.Player):
                     break
         assert(king_data is not None)
 
+        king_data[0].safe_moves = king_data[0].check_safe_moves(board.layout, king_data[1])
+
         for y in range(8):
             for x in range(8):
                 piece = board.layout[y][x]
@@ -56,4 +58,4 @@ class BotPlayer(chess.Player):
             option_scores[(old_pos, new_pos)] = self.score(board.layout)
             piece.undo_temp_move(board.layout)
 
-        return max(option_scores, key=option_scores.get)
+        return max(option_scores, key=option_scores.__getitem__, default=None)

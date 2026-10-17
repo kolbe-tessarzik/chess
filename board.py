@@ -147,7 +147,7 @@ class Piece:
                 break
             else:
                 print(f"Failed at {test_pos}")
-                # edge of the board
+                # edge of the board or piece in the way
                 break
 
         if debug:
@@ -207,10 +207,8 @@ class Piece:
                         test_pos = (pos[0] + diff[0], pos[1] + diff[1])
                         self.update_moves_and_attacks(self.try_single_move(board, test_pos), moves, attacks)
 
-        if self.type == PieceType.KING:
-            for good_pos in self.safe_moves:
-                if good_pos == (3, 1):
-                    print("Oops")
+        if my_type == PieceType.KING:
+            for good_pos in self.safe_moves if reverse_as is None else [(pos[0] + diff[0], pos[1] + diff[1]) for diff in itertools.product((-1, 0, 1), (-1, 0, 1))]:
                 self.update_moves_and_attacks(self.try_single_move(board, good_pos), moves, attacks)
 
         if my_type == PieceType.PAWN:
@@ -218,12 +216,11 @@ class Piece:
             move, _ = self.try_single_move(board, test_pos) # can't attack forward
             if move is not None:
                 moves.append(move)
-
-            if not self.has_moved:
-                test_pos = (pos[0], pos[1] + self.color.value*2)
-                move, _ = self.try_single_move(board, test_pos) # can't attack forward
-                if move is not None:
-                    moves.append(move)
+                if not self.has_moved:
+                    test_pos = (pos[0], pos[1] + self.color.value*2)
+                    move, _ = self.try_single_move(board, test_pos) # can't attack forward
+                    if move is not None:
+                        moves.append(move)
 
             for diff_x in (1, -1):
                 test_pos = (pos[0] + diff_x, pos[1] + self.color.value)
@@ -299,6 +296,7 @@ class Board:
         if piece.color != Color.NO_COLOR:
             self.taken_pieces[not_color(piece.color)].append(self.layout[new_pos[1]][new_pos[0]])
         self.layout[new_pos[1]][new_pos[0]] = piece
+        piece.has_moved = True
 
     def draw_squares(self, screen: pg.Surface):
         w = screen.get_width()
