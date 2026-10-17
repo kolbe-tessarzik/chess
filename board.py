@@ -53,6 +53,29 @@ class Piece:
         self.has_moved = False
         self.surf = None
         self.safe_moves = []
+        self.temp_moves: list[tuple[tuple[int, int], tuple[int, int], "Piece"]] = []
+
+    def temp_move(self, board: list[list["Piece"]], pos: tuple[int, int], new_pos: tuple[int, int]):
+        assert(self.check_dim(pos))
+        assert(self.check_dim(new_pos))
+        assert(board[pos[1]][pos[0]] is self)
+
+        old_piece = board[new_pos[1]][new_pos[0]]
+        board[pos[1]][pos[0]] = NO_PIECE
+        board[new_pos[1]][new_pos[0]] = self
+
+        self.temp_moves.append((pos, new_pos, old_piece))
+
+    def undo_temp_move(self, board: list[list["Piece"]]):
+        assert(self.temp_moves)
+
+        pos, new_pos, old_piece = self.temp_moves.pop()
+        assert(self.check_dim(pos))
+        assert(self.check_dim(new_pos))
+        assert(board[new_pos[1]][new_pos[0]] is self)
+
+        board[new_pos[1]][new_pos[0]] = old_piece
+        board[pos[1]][pos[0]] = self
 
     def check_safe_moves(self, board: list[list["Piece"]], pos: tuple[int, int], only_current = False) -> list[tuple[int, int]]:
         """
