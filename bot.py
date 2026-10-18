@@ -13,6 +13,7 @@ POINTS_FOR_PIECE = {
 
 WEIGHTS = {
     "score_up": 1,
+    "threat": 0.5,
 }
 
 def score_up(board: list[list[chess.Piece]], color: Color):
@@ -24,10 +25,38 @@ def score_up(board: list[list[chess.Piece]], color: Color):
             accum += piece.color.value * color_mult * POINTS_FOR_PIECE[piece.type]
     return accum
 
+def threat(board: list[list[chess.Piece]], king_data, color: Color):
+    threatened_pieces = []
+    for x in range(8):
+        for y in range(8):
+            piece = board[y][x]
+            if piece.color == Color.NO_COLOR:
+                continue
+            _, attacks = piece.get_legal_moves(board, (x, y), king_data=king_data)
+            for attack in attacks:
+                if (attack, (piece.color, piece.type)) not in threatened_pieces:
+                    threatened_pieces.append((attack, (piece.color, piece.type)))
+
+    accum = 0
+    color_mult = color.value
+
+    for (x, y), (threat_color, threat_type) in threatened_pieces:
+        piece = board[y][x]
+        if threat_color == piece.color:
+            continue
+        mult = 2 if piece.color == color else 1
+        accum -= piece.color.value * color_mult * mult * POINTS_FOR_PIECE[piece.type] / POINTS_FOR_PIECE[threat_type]
+
+    return accum
+
 class BotPlayer(chess.Player):
-    def score(self, board) -> float:
+    def score(self, board, king_data) -> float:
         points_up = score_up(board, self.color)
-        return points_up * WEIGHTS["score_up"]
+        threat_up = threat(board, king_data, self.color)
+        return (
+            points_up * WEIGHTS["score_up"] +
+            threat_up * WEIGHTS["threat"]
+        )
 
     def get_move(self, board: chess.Board) -> tuple[tuple[int, int], tuple[int, int]] | None:
         options: list[tuple[tuple[int, int], tuple[int, int]]] = []
@@ -55,7 +84,7 @@ class BotPlayer(chess.Player):
         for old_pos, new_pos in options:
             piece = board.layout[old_pos[1]][old_pos[0]]
             piece.temp_move(board.layout, old_pos, new_pos)
-            option_scores[(old_pos, new_pos)] = self.score(board.layout)
+            option_scores[(old_pos, new_pos)] = self.score(board.layout, king_data)
             piece.undo_temp_move(board.layout)
 
         return max(option_scores, key=option_scores.__getitem__, default=None)
