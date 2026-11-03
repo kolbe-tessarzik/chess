@@ -1,6 +1,5 @@
 import pygame as pg # pyright: ignore[reportMissingImports]
 from board import Board, Game, PieceType, Color, Piece, Player
-import bot
 
 class HumanPlayer(Player):
     def __init__(self, color: Color):
@@ -33,24 +32,28 @@ class HumanPlayer(Player):
             return move
         return None
 
-game = Game(players=(HumanPlayer(Color.WHITE), bot.BotPlayer(Color.BLACK)))
+if __name__ == "__main__":
 
-screen = pg.display.set_mode((800, 800))
+    game = Game(players=(HumanPlayer(Color.WHITE), HumanPlayer(Color.BLACK)))
 
-running = True
-while running:
-    for event in pg.event.get():
-        match event.type:
-            case pg.QUIT:
-                running = False
-            case pg.MOUSEBUTTONDOWN:
-                print(game.turn)
-                print(game.players[game.turn])
-                if isinstance(game.players[game.turn], HumanPlayer):
-                    game.players[game.turn].click(event.pos) # pyright: ignore[reportAttributeAccessIssue]
-            case _:
-                pass
+    screen = pg.display.set_mode((800, 800))
 
-    game.update()
-    game.draw(screen)
-    pg.display.flip()
+    running = True
+    while running:
+        for event in pg.event.get():
+            match event.type:
+                case pg.QUIT:
+                    running = False
+                case pg.MOUSEBUTTONDOWN:
+                    print(game.turn)
+                    print(game.players[game.turn])
+                    if isinstance(game.players[game.turn], HumanPlayer):
+                        game.players[game.turn].click(event.pos) # pyright: ignore[reportAttributeAccessIssue]
+                case _:
+                    pass
+
+        game.update()
+        if game.winner:
+            break
+        game.draw(screen)
+        pg.display.flip()
