@@ -92,6 +92,8 @@ class Piece:
                 safe_moves.remove(move)
                 continue
 
+            # self.temp_move(board, pos, move)
+
             old_piece = board[move[1]][move[0]]
 
             board[move[1]][move[0]] = self
@@ -104,7 +106,7 @@ class Piece:
                     piece = board[attacker[1]][attacker[0]]
                     if piece.type == piece_type:
                         safe_moves.remove(move)
-                        print(f"Can't move to {move} because of {piece_type.value} at {attacker}")
+                        # print(f"Can't move to {move} because of {piece_type.value} at {attacker}")
                         break
                 else:
                     continue
@@ -128,30 +130,21 @@ class Piece:
         attacks: list[tuple[int, int]] = []
 
         if diff[0] and diff[1]:
-            print("Debug active")
             debug = True
         else:
             debug = False
 
         for i in range(1, 8):
             test_pos = (pos[0] + diff[0]*i, pos[1] + diff[1]*i)
-            if debug:
-                print(test_pos, pos, diff)
             move, attack = self.try_single_move(board, test_pos)
             if move is not None:
                 moves.append(move)
             elif attack is not None:
-                if debug:
-                    print(f"Attack at pos: {test_pos}")
                 attacks.append(attack)
                 break
             else:
-                print(f"Failed at {test_pos}")
                 # edge of the board or piece in the way
                 break
-
-        if debug:
-            print(moves, attacks)
 
         return moves, attacks
 
@@ -165,7 +158,7 @@ class Piece:
     def check_dim(self, pos: tuple[int, int]):
         return 8 > pos[0] >= 0 and 8 > pos[1] >= 0
 
-    def get_legal_moves(self, board: list[list["Piece"]], pos: tuple[int, int], *, king_data: tuple["Piece", tuple[int, int]] | None = None, reverse_as: PieceType | None = None):
+    def get_legal_moves(self, board: list[list["Piece"]], pos: tuple[int, int], *, king_data: tuple["Piece", tuple[int, int]] | None = None, reverse_as: PieceType | None = None, pawn_rev = False):
         """
         Returns (legal moves, legal attacks) for this piece at the given position
         """
@@ -212,18 +205,19 @@ class Piece:
                 self.update_moves_and_attacks(self.try_single_move(board, good_pos), moves, attacks)
 
         if my_type == PieceType.PAWN:
-            test_pos = (pos[0], pos[1] + self.color.value)
+            mult = self.color.value * -(pawn_rev*2 - 1)
+            test_pos = (pos[0], pos[1] + mult)
             move, _ = self.try_single_move(board, test_pos) # can't attack forward
             if move is not None:
                 moves.append(move)
                 if not self.has_moved:
-                    test_pos = (pos[0], pos[1] + self.color.value*2)
+                    test_pos = (pos[0], pos[1] + mult*2)
                     move, _ = self.try_single_move(board, test_pos) # can't attack forward
                     if move is not None:
                         moves.append(move)
 
             for diff_x in (1, -1):
-                test_pos = (pos[0] + diff_x, pos[1] + self.color.value)
+                test_pos = (pos[0] + diff_x, pos[1] + mult)
                 _, attack = self.try_single_move(board, test_pos) # can't move diagonal
                 if attack is not None:
                     attacks.append(attack)
@@ -234,10 +228,10 @@ class Piece:
                 board[pos[1]][pos[0]] = NO_PIECE
                 old_piece = board[move[1]][move[0]]
                 board[move[1]][move[0]] = self
-                if move == (0, 2):
-                    print("KING CHECK:", king.check_safe_moves(board, king_pos, only_current=True))
+                # if move == (0, 2):
+                #     print("KING CHECK:", king.check_safe_moves(board, king_pos, only_current=True))
                 if king_pos not in king.check_safe_moves(board, king_pos, only_current=True):
-                    print("KING CHECK FAILED")
+                    # print("KING CHECK FAILED")
                     if move in moves:
                         moves.remove(move)
                     elif move in attacks:
@@ -282,6 +276,11 @@ class Board:
             Color.BLACK: [],
         }
 
+    def copy(self):
+        ret = Board()
+        ret.layout = [row.copy() for row in self.layout]
+        return ret
+
     def make_move(self, old_pos, new_pos, color):
         piece = self.layout[old_pos[1]][old_pos[0]]
         if piece.color != color:
@@ -297,6 +296,32 @@ class Board:
             self.taken_pieces[not_color(piece.color)].append(self.layout[new_pos[1]][new_pos[0]])
         self.layout[new_pos[1]][new_pos[0]] = piece
         piece.has_moved = True
+
+    def get_moves(self, color: Color, for_piece: Piece | None = None):
+        all_pieces = []
+        king = None
+        king_pos = None
+        for y in range(8):
+            for x in range(8):
+                piece = self.layout[y][x]
+                if piece.color == color:
+                    if not for_piece:
+                        all_pieces.append((piece, (x, y)))
+                    elif piece == for_piece:
+                        all_pieces = [(piece, (x, y))]
+                if piece.type == PieceType.KING and piece.color == color:
+                    king = piece
+                    king_pos = (x, y)
+        if king is not None:
+            assert(king_pos)
+            king.safe_moves = king.check_safe_moves(self.layout, king_pos)
+
+        ret = []
+        for piece, old_pos in all_pieces:
+            moves, attacks = piece.get_legal_moves(self.layout, old_pos, king_data=((king, king_pos) if king and king_pos else None))
+            ret += [(old_pos, new_pos) for new_pos in moves+attacks]
+
+        return ret
 
     def draw_squares(self, screen: pg.Surface):
         w = screen.get_width()
@@ -336,6 +361,7 @@ class Game:
         }
         self.board_surf = pg.Surface((800, 800))
         self.redraw = True
+        self.winner = None
 
     def update(self):
         player = self.players[self.turn]
@@ -358,13 +384,16 @@ class Game:
             target_color = self.board.layout[new_pos[1]][new_pos[0]].color
             if self.board.layout[old_pos[1]][old_pos[0]].color != self.turn:
                 print(f"Wrong color: {self.board.layout[old_pos[1]][old_pos[0]].color} vs {self.turn}")
+                print(f"{str_for_color[player.color]}")
                 return
-            if new_pos not in self.board.layout[old_pos[1]][old_pos[0]].get_legal_moves(self.board.layout, old_pos, king_data=((king, king_pos) if king and king_pos else None))[int(target_color != Color.NO_COLOR)]:
+            if (old_pos, new_pos) not in self.board.get_moves(self.turn, self.board.layout[old_pos[1]][old_pos[0]]):
                 print(f"Illegal move: {old_pos} to {new_pos}")
                 return
             self.board.make_move(old_pos, new_pos, self.turn)
             self.turn = not_color(self.turn)
             self.redraw = True
+            if not self.board.get_moves(self.turn):
+                self.winner = not_color(self.turn)
 
     def draw(self, screen: pg.Surface):
         if self.redraw:
