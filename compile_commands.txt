@@ -1,0 +1,4 @@
+Windows+Linux don't work
+
+MacOS:
+clang -dynamiclib -o engine.dylib engine.c -arch arm64

@@ -1,39 +1,12 @@
 from __future__ import annotations
 from pathlib import Path
-import itertools
+import engine
+from engine import Board, Color
 
 import pygame as pg # pyright: ignore[reportMissingImports]
-import ctypes
-from enum import Enum
 from typing import Any, Callable, Self
 
 ASSET_PATH = Path("assets") / "image"
-
-class Color(Enum):
-    NO_COLOR = 0
-    WHITE = -1
-    BLACK =  1
-
-def not_color(color: Color):
-    if color == Color.NO_COLOR:
-        raise(ValueError("No color has no opposite"))
-    return Color.WHITE if color == Color.BLACK else Color.BLACK
-
-str_for_color = {
-    Color.NO_COLOR: "no_color",
-    Color.WHITE: "white",
-    Color.BLACK: "black",
-}
-
-class PieceType(Enum):
-    NO_PIECE = None
-    BISHOP   = "bishop"
-    ROOK     = "rook"
-    KNIGHT   = "knight"
-    QUEEN    = "queen"
-    KING     = "king"
-    PAWN     = "pawn"
-
 
 # def invert_colors(surface):
 #     inv_surface = pg.Surface(surface.get_size())
@@ -46,282 +19,70 @@ class PieceType(Enum):
 
 #     return inv_surface
 
-class Piece:
-    def __init__(self, piece_type: PieceType, color: Color):
+class Player:
+    def __init__(self, color: Color):
         self.color = color
-        self.type = piece_type
-        self.has_moved = False
-        self.surf = None
-        self.safe_moves = []
-        self.temp_moves: list[tuple[tuple[int, int], tuple[int, int], "Piece"]] = []
 
-    def temp_move(self, board: list[list["Piece"]], pos: tuple[int, int], new_pos: tuple[int, int]):
-        assert(self.check_dim(pos))
-        assert(self.check_dim(new_pos))
-        assert(board[pos[1]][pos[0]] is self)
+    def get_move(self, board: Board) -> tuple[tuple[int, int], tuple[int, int]] | None:
+        raise NotImplementedError("This method should be implemented by subclasses")
 
-        old_piece = board[new_pos[1]][new_pos[0]]
-        board[pos[1]][pos[0]] = NO_PIECE
-        board[new_pos[1]][new_pos[0]] = self
+    def __repr__(self):
+        return f"Player({"black" if self.color.value else "white"})"
 
-        self.temp_moves.append((pos, new_pos, old_piece))
-
-    def undo_temp_move(self, board: list[list["Piece"]]):
-        assert(self.temp_moves)
-
-        pos, new_pos, old_piece = self.temp_moves.pop()
-        assert(self.check_dim(pos))
-        assert(self.check_dim(new_pos))
-        assert(board[new_pos[1]][new_pos[0]] is self)
-
-        board[new_pos[1]][new_pos[0]] = old_piece
-        board[pos[1]][pos[0]] = self
-
-    def check_safe_moves(self, board: list[list["Piece"]], pos: tuple[int, int], only_current = False) -> list[tuple[int, int]]:
-        """
-        Function only to be called on a king to check which moves are safe
-        """
-        assert(self.type == PieceType.KING)
-
-        safe_moves = [(pos[0] + diff[0], pos[1] + diff[1]) for diff in ([(0, 0)] if only_current else itertools.product((-1, 0, 1), (-1, 0, 1)))]
-
-        board[pos[1]][pos[0]] = NO_PIECE # type: ignore
-
-        for move in safe_moves.copy():
-            if not self.check_dim(move) or board[move[1]][move[0]].color == self.color:
-                safe_moves.remove(move)
-                continue
-
-            # self.temp_move(board, pos, move)
-
-            old_piece = board[move[1]][move[0]]
-
-            board[move[1]][move[0]] = self
-
-            for piece_type in PieceType:
-                if piece_type == PieceType.NO_PIECE:
-                    continue
-                _, attackers = self.get_legal_moves(board, move, reverse_as=piece_type)
-                for attacker in attackers:
-                    piece = board[attacker[1]][attacker[0]]
-                    if piece.type == piece_type:
-                        safe_moves.remove(move)
-                        # print(f"Can't move to {move} because of {piece_type.value} at {attacker}")
-                        break
-                else:
-                    continue
-                break
-
-            board[move[1]][move[0]] = old_piece
-
-        board[pos[1]][pos[0]] = self
-
-        return safe_moves
-
-    def try_single_move(self, board: list[list["Piece"]], test_pos: tuple[int, int]):
-        if not self.check_dim(test_pos) or board[test_pos[1]][test_pos[0]].color == self.color:
-            return None, None
-        if board[test_pos[1]][test_pos[0]].color.value == -self.color.value:
-            return None, test_pos
-        return test_pos, None
-
-    def try_linear_moves(self, board: list[list["Piece"]], pos: tuple[int, int], diff: tuple[int, int]):
-        moves:   list[tuple[int, int]] = []
-        attacks: list[tuple[int, int]] = []
-
-        if diff[0] and diff[1]:
-            debug = True
-        else:
-            debug = False
-
-        for i in range(1, 8):
-            test_pos = (pos[0] + diff[0]*i, pos[1] + diff[1]*i)
-            move, attack = self.try_single_move(board, test_pos)
-            if move is not None:
-                moves.append(move)
-            elif attack is not None:
-                attacks.append(attack)
-                break
-            else:
-                # edge of the board or piece in the way
-                break
-
-        return moves, attacks
-
-    def update_moves_and_attacks(self, pair: tuple[tuple[int, int] | None, tuple[int, int] | None], moves: list[tuple[int, int]], attacks: list[tuple[int, int]]):
-        move, attack = pair
-        if move is not None:
-            moves.append(move)
-        elif attack is not None:
-            attacks.append(attack)
-
-    def check_dim(self, pos: tuple[int, int]):
-        return 8 > pos[0] >= 0 and 8 > pos[1] >= 0
-
-    def get_legal_moves(self, board: list[list["Piece"]], pos: tuple[int, int], *, king_data: tuple["Piece", tuple[int, int]] | None = None, reverse_as: PieceType | None = None, pawn_rev = False):
-        """
-        Returns (legal moves, legal attacks) for this piece at the given position
-        """
-        assert(self.check_dim(pos))
-        assert(board[pos[1]][pos[0]] is self)
-        moves: list[tuple[int, int]] = []
-        attacks: list[tuple[int, int]] = []
-
-        if king_data is not None:
-            king, king_pos = king_data
-        else:
-            king = None
-            king_pos = None
-
-        my_type = reverse_as or self.type
-        # if my_type == reverse_as == PieceType.BISHOP:
-        #     print("Yippie!")
-        # if reverse_as is not None:
-        #     self.color = not_color(self.color)
-
-        if my_type in (PieceType.QUEEN, PieceType.ROOK):
-            for diff in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                more_moves, more_attacks = self.try_linear_moves(board, pos, diff)
-                moves   += more_moves
-                attacks += more_attacks
-
-        if my_type in (PieceType.QUEEN, PieceType.BISHOP):
-            for x_step in (-1, 1):
-                for y_step in (-1, 1):
-                    more_moves, more_attacks = self.try_linear_moves(board, pos, (x_step, y_step))
-                    moves   += more_moves
-                    attacks += more_attacks
-
-        if my_type == PieceType.KNIGHT:
-            for base in (1, 2), (2, 1):
-                for mod_x in (1, -1):
-                    for mod_y in (1, -1):
-                        diff = (base[0] * mod_x, base[1] * mod_y)
-                        test_pos = (pos[0] + diff[0], pos[1] + diff[1])
-                        self.update_moves_and_attacks(self.try_single_move(board, test_pos), moves, attacks)
-
-        if my_type == PieceType.KING:
-            for good_pos in self.safe_moves if reverse_as is None else [(pos[0] + diff[0], pos[1] + diff[1]) for diff in itertools.product((-1, 0, 1), (-1, 0, 1))]:
-                self.update_moves_and_attacks(self.try_single_move(board, good_pos), moves, attacks)
-
-        if my_type == PieceType.PAWN:
-            mult = self.color.value * -(pawn_rev*2 - 1)
-            test_pos = (pos[0], pos[1] + mult)
-            move, _ = self.try_single_move(board, test_pos) # can't attack forward
-            if move is not None:
-                moves.append(move)
-                if not self.has_moved:
-                    test_pos = (pos[0], pos[1] + mult*2)
-                    move, _ = self.try_single_move(board, test_pos) # can't attack forward
-                    if move is not None:
-                        moves.append(move)
-
-            for diff_x in (1, -1):
-                test_pos = (pos[0] + diff_x, pos[1] + mult)
-                _, attack = self.try_single_move(board, test_pos) # can't move diagonal
-                if attack is not None:
-                    attacks.append(attack)
-
-        if king and self.type != PieceType.KING:
-            assert(king_pos)
-            for move in moves + attacks:
-                board[pos[1]][pos[0]] = NO_PIECE
-                old_piece = board[move[1]][move[0]]
-                board[move[1]][move[0]] = self
-                # if move == (0, 2):
-                #     print("KING CHECK:", king.check_safe_moves(board, king_pos, only_current=True))
-                if king_pos not in king.check_safe_moves(board, king_pos, only_current=True):
-                    # print("KING CHECK FAILED")
-                    if move in moves:
-                        moves.remove(move)
-                    elif move in attacks:
-                        attacks.remove(move)
-                board[move[1]][move[0]] = old_piece
-                board[pos[1]][pos[0]] = self
-
-        # if reverse_as is not None:
-        #     self.color = not_color(self.color)
-
-        # if my_type == reverse_as == PieceType.BISHOP:
-        #     print(f"Bishop: {moves}, {attacks}")
-
-        return moves, attacks
-
-    def draw(self, screen: pg.Surface, center_pos: tuple[float, float]):
-        if self.type == PieceType.NO_PIECE:
-            return
-
-        if self.surf is None:
-            self.surf = pg.image.load(ASSET_PATH / f"{str_for_color[self.color]}_{self.type.value}.png").convert_alpha()
-
-        pos = (center_pos[0] - self.surf.get_width()/2, center_pos[1] - self.surf.get_height()/2)
-        screen.blit(self.surf, pos)
-
-NO_PIECE = Piece(PieceType.NO_PIECE, Color.NO_COLOR)
-
-BACK_ROW = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK]
-FRONT_ROW = [PieceType.PAWN] * 8
-
-class Board:
-    def __init__(self):
-        self.layout = [[Piece(PieceType.NO_PIECE, Color.NO_COLOR) for _ in range(8)] for _ in range(8)]
-        self.layout[7] = [Piece(t, Color.WHITE) for t in BACK_ROW]
-        self.layout[0] = [Piece(t, Color.BLACK) for t in BACK_ROW]
-
-        self.layout[6] = [Piece(t, Color.WHITE) for t in FRONT_ROW]
-        self.layout[1] = [Piece(t, Color.BLACK) for t in FRONT_ROW]
-
-        self.taken_pieces = {
-            Color.WHITE: [],
-            Color.BLACK: [],
+class Game:
+    def __init__(self, players: tuple[Player, Player]):
+        self.board = engine.INITIAL_SETUP.copy()
+        self.turn = int(Color.WHITE.value)
+        self.players = {
+            Color.WHITE.value: players[0],
+            Color.BLACK.value: players[1],
+        }
+        self.board_surf = pg.Surface((800, 800))
+        self.redraw = True
+        self.winner = None
+        self.surf_for_piece: dict[int, str | pg.Surface] = {
+            0 : "white_pawn.png",
+            1 : "white_king.png",
+            2 : "white_queen.png",
+            3 : "white_bishop.png",
+            4 : "white_knight.png",
+            5 : "white_rook.png",
+            6 : "black_pawn.png",
+            7 : "black_king.png",
+            8 : "black_queen.png",
+            9 : "black_bishop.png",
+            10: "black_knight.png",
+            11: "black_rook.png",
         }
 
-    def copy(self):
-        ret = Board()
-        ret.layout = [row.copy() for row in self.layout]
-        return ret
+    def update(self):
+        player = self.players[self.turn]
+        move = player.get_move(self.board)
+        if move:
+            old_pos, new_pos = move
 
-    def make_move(self, old_pos, new_pos, color):
-        piece = self.layout[old_pos[1]][old_pos[0]]
-        if piece.color != color:
-            print(str_for_color[piece.color])
-            raise(ValueError("Wrong color or no piece"))
+            old_pos_mask = engine.pos_to_mask(old_pos)
+            new_pos_mask = engine.pos_to_mask(new_pos)
+            attack_index = -1
+            i = None
+            # have to get correct piece index
+            for piece_index in range(12):
+                if (engine.color_of(piece_index) == self.turn) and self.board.by_piece[piece_index] & old_pos_mask:
+                    print(f"{piece_index=}")
+                    i = piece_index
+                    continue
+                if (engine.color_of(piece_index) != self.turn) and (self.board.by_piece[piece_index] & new_pos_mask):
+                    attack_index = piece_index
+            if i is None:
+                # bad move; no piece
+                print("bad move, no piece")
+                return
 
-        target = self.layout[new_pos[1]][new_pos[0]]
-        if target.color == color:
-            raise(ValueError("Cannot take own piece"))
-
-        self.layout[old_pos[1]][old_pos[0]] = NO_PIECE
-        if piece.color != Color.NO_COLOR:
-            self.taken_pieces[not_color(piece.color)].append(self.layout[new_pos[1]][new_pos[0]])
-        self.layout[new_pos[1]][new_pos[0]] = piece
-        piece.has_moved = True
-
-    def get_moves(self, color: Color, for_piece: Piece | None = None):
-        all_pieces = []
-        king = None
-        king_pos = None
-        for y in range(8):
-            for x in range(8):
-                piece = self.layout[y][x]
-                if piece.color == color:
-                    if not for_piece:
-                        all_pieces.append((piece, (x, y)))
-                    elif piece == for_piece:
-                        all_pieces = [(piece, (x, y))]
-                if piece.type == PieceType.KING and piece.color == color:
-                    king = piece
-                    king_pos = (x, y)
-        if king is not None:
-            assert(king_pos)
-            king.safe_moves = king.check_safe_moves(self.layout, king_pos)
-
-        ret = []
-        for piece, old_pos in all_pieces:
-            moves, attacks = piece.get_legal_moves(self.layout, old_pos, king_data=((king, king_pos) if king and king_pos else None))
-            ret += [(old_pos, new_pos) for new_pos in moves+attacks]
-
-        return ret
+            c_move = engine.Move(initial=old_pos_mask, result=new_pos_mask, i=i, attack_index=attack_index)
+            if engine.check_move(self.board, c_move):
+                engine.make_move(self.board, c_move)
+                self.turn = int(not self.turn)
+                self.redraw = True
 
     def draw_squares(self, screen: pg.Surface):
         w = screen.get_width()
@@ -332,71 +93,18 @@ class Board:
                 pg.draw.rect(screen, color, (x * w/8, y * h/8, w/8, h/8))
 
     def draw(self, screen: pg.Surface):
-        w = screen.get_width()
-        h = screen.get_height()
-        self.draw_squares(screen)
-        for y in range(8):
-            for x in range(8):
-                piece = self.layout[y][x]
-                if piece.type != PieceType.NO_PIECE:
-                    piece.draw(screen, (x * w/8 + w/16, y * h/8 + h/16))
-
-class Player:
-    def __init__(self, color: Color):
-        self.color = color
-
-    def get_move(self, board: Board) -> tuple[tuple[int, int], tuple[int, int]] | None:
-        raise NotImplementedError("This method should be implemented by subclasses")
-
-    def __repr__(self):
-        return f"Player({str_for_color[self.color]})"
-
-class Game:
-    def __init__(self, players: tuple[Player, Player]):
-        self.board = Board()
-        self.turn = Color.WHITE
-        self.players = {
-            Color.WHITE: players[0],
-            Color.BLACK: players[1],
-        }
-        self.board_surf = pg.Surface((800, 800))
-        self.redraw = True
-        self.winner = None
-
-    def update(self):
-        player = self.players[self.turn]
-        move = player.get_move(self.board)
-        king = None
-        king_pos = None
-        if move is not None:
-            for y in range(8):
-                for x in range(8):
-                    piece = self.board.layout[y][x]
-                    if piece.type == PieceType.KING and piece.color == self.turn:
-                        king = piece
-                        king_pos = (x, y)
-            if king is not None:
-                assert(king_pos)
-                king.safe_moves = king.check_safe_moves(self.board.layout, king_pos)
-            old_pos, new_pos = move
-            if not self.board.layout[old_pos[1]][old_pos[0]].check_dim(old_pos) or not self.board.layout[new_pos[1]][new_pos[0]].check_dim(new_pos):
-                raise(ValueError("Move out of bounds"))
-            target_color = self.board.layout[new_pos[1]][new_pos[0]].color
-            if self.board.layout[old_pos[1]][old_pos[0]].color != self.turn:
-                print(f"Wrong color: {self.board.layout[old_pos[1]][old_pos[0]].color} vs {self.turn}")
-                print(f"{str_for_color[player.color]}")
-                return
-            if (old_pos, new_pos) not in self.board.get_moves(self.turn, self.board.layout[old_pos[1]][old_pos[0]]):
-                print(f"Illegal move: {old_pos} to {new_pos}")
-                return
-            self.board.make_move(old_pos, new_pos, self.turn)
-            self.turn = not_color(self.turn)
-            self.redraw = True
-            if not self.board.get_moves(self.turn):
-                self.winner = not_color(self.turn)
-
-    def draw(self, screen: pg.Surface):
         if self.redraw:
-            self.board.draw(self.board_surf)
+            self.draw_squares(self.board_surf)
+            for i in range(12):
+                if type(self.surf_for_piece[i]) == str:
+                    self.surf_for_piece[i] = pg.image.load(ASSET_PATH / self.surf_for_piece[i])
+                remaining = self.board.by_piece[i]
+                while remaining:
+                    lsb = remaining & -remaining
+                    bit_index = (lsb - 1).bit_length()
+                    pos = (7 - (bit_index % 8), 7 - (bit_index // 8))
+
+                    self.board_surf.blit(self.surf_for_piece[i], (pos[0]*100+50-self.surf_for_piece[i].get_width()//2, pos[1]*100+50-self.surf_for_piece[i].get_height()//2)) # pyright: ignore[reportAttributeAccessIssue]
+                    remaining &= remaining - 1
             self.redraw = False
         screen.blit(self.board_surf, (0, 0))

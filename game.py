@@ -1,5 +1,5 @@
 import pygame as pg # pyright: ignore[reportMissingImports]
-from board import Board, Game, PieceType, Color, Piece, Player
+from board import Board, Game, Color, Player
 
 class HumanPlayer(Player):
     def __init__(self, color: Color):
