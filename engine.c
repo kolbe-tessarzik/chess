@@ -58,7 +58,7 @@ struct Board
     uint64_t white_pieces;
     uint64_t black_pieces;
 
-    uint8_t castling_rights; // 0 0 0 0 WKS WQS BKS BQS
+    uint8_t castling_rights; // 0 0 0 0 BKS BQS WKS WQS
 };
 
 struct Move
@@ -68,6 +68,11 @@ struct Move
     uint64_t result;
     int8_t attack_index;
 };
+
+const struct Move wks_castle = {WHITE_KING, 0b00001000, 0b00000010, -1};
+const struct Move wqs_castle = {WHITE_KING, 0b00001000, 0b00100000, -1};
+const struct Move bks_castle = {BLACK_KING, 0b00001000ULL << 56, 0b00000010ULL << 56, -1};
+const struct Move bqs_castle = {BLACK_KING, 0b00001000ULL << 56, 0b00100000ULL << 56, -1};
 
 /* Board bit indices; x increases rightward and y increases downward.
    Square (x, y) uses bit (7 - x) + (7 - y) * 8.
@@ -137,14 +142,21 @@ uint64_t mask_rows_left(uint8_t up_to) {
     return accum;
 }
 
-#define INDEX_TO_POS(i) {(7 - ((i) % 8)), 7 - ((i) / 8)}
+#define INDEX_TO_POS(i) (struct Coord){(7 - ((i) % 8)), 7 - ((i) / 8)}
 #define MASK_POS(pos)  (UINT64_C(1) << ((7 - (pos)->x) + (7 - (pos)->y) * 8))
 #define POS_INDEX(pos) ((7 - (pos)->x) + (7 - (pos)->y) * 8)
 
 #define ROOK_NS_PURE(x) (UINT64_C(0x0101010101010101) << (7 - (x)))
 #define ROOK_EW_PURE(y) (UINT64_C(0xFF) << ((7 - (y)) * 8))
 
-void make_move_no_check(struct Board* board, struct Move* move);
+void pop_lsb(uint64_t* num, struct Coord* pos)
+{
+    uint8_t i = __builtin_ctzll(*num);
+    *num &= *num - 1;
+    *pos = INDEX_TO_POS(i);
+}
+
+void make_temp_move_ip(struct Board* board, struct Move* move);
 void unmake_move(struct Board* board, struct Move* move);
 
 uint64_t get_all_rook_moves_pure(struct Coord *pos)
@@ -334,15 +346,14 @@ uint8_t square_attacked(struct Board *board, struct Coord *test_pos, enum Color 
 
         while (remaining)
         {
-            uint8_t i = (uint8_t)__builtin_ctzll(remaining);
-            struct Coord attacker_pos = {7 - i % 8, 7 - i / 8};
+            struct Coord attacker_pos;
+            pop_lsb(&remaining, &attacker_pos);
             // must be king, all other pieces handled above
             if (KING_PURE(attacker_pos, *test_pos))
             {
                 return 1;
             }
 
-            remaining &= remaining - 1; // Clear the bit we just read
         }
     }
     return 0;
@@ -430,7 +441,7 @@ uint64_t check_king_move_threats(struct Board *board, struct Coord *pos, enum Co
     return ret;
 }
 
-void make_move_no_check(struct Board* board, struct Move* move)
+void make_temp_move_ip(struct Board* board, struct Move* move)
 {
     uint8_t enemy_start = (move->i / 6 == WHITE) ? 6 : 0;
 
@@ -444,11 +455,56 @@ void make_move_no_check(struct Board* board, struct Move* move)
     }
     board->by_piece[move->i] &= ~move->initial;
     board->by_piece[move->i] |= move->result;
+    if (move->i % 6 == KING)
+    {
+        if ((move->initial == wks_castle.initial || move->initial == bks_castle.initial) && (move->result & (wks_castle.result | wqs_castle.result | bks_castle.result | bqs_castle.result)))
+        {
+            struct Move rook_move = {((move->i / 6) * 6) + ROOK, 0, 0, -1};
+
+            uint8_t shift = (move->i/6)*56;
+
+            if (move->result >> shift == wks_castle.result)
+            {
+                // king side
+                rook_move.initial = 1ULL << shift;
+                rook_move.result  = 0b100ULL << shift;
+            }
+            else
+            {
+                // queen side
+                rook_move.initial = 0b10000000ULL << shift;
+                rook_move.result  = 0b00010000ULL << shift;
+            }
+            make_temp_move_ip(board, &rook_move);
+        }
+        board->castling_rights &= ~(0b11 << (move->i / 6)*2);
+
+    }
+
+    if (move->initial & (0b10000000ULL << (move->i/6)*56))
+    {
+        // queen side rook
+        board->castling_rights = SET_BIT(board->castling_rights, (move->i / 6)*2, 0);
+    }
+    else if (move->initial & (0b00000001ULL << (move->i/6)*56))
+    {
+        // king side rook
+        board->castling_rights = SET_BIT(board->castling_rights, (move->i / 6)*2+1, 0);
+
+    }
+
     if (move->attack_index >= 0)
     {
         board->by_piece[move->attack_index] &= ~move->result;
     }
     redo_board(board);
+}
+
+struct Board make_temp_move(struct Board* board, struct Move* move)
+{
+    struct Board ret_board = *board;
+    make_temp_move_ip(&ret_board, move);
+    return ret_board;
 }
 
 uint8_t check_move(struct Board* board, struct Move* move)
@@ -457,7 +513,10 @@ uint8_t check_move(struct Board* board, struct Move* move)
     uint8_t initial_bit = __builtin_ctzll(move->initial);
     uint8_t result_bit  = __builtin_ctzll(move->result);
 
-    uint64_t friendly_pieces = (uint8_t)(move->i / 6) ? board->black_pieces : board->white_pieces;
+    enum Color color = move->i / 6;
+
+
+    uint64_t friendly_pieces = (uint8_t)(color) ? board->black_pieces : board->white_pieces;
 
     if (move->result & friendly_pieces)
     {
@@ -468,40 +527,76 @@ uint8_t check_move(struct Board* board, struct Move* move)
     struct Coord initial_pos = {7 - initial_bit % 8, 7 - initial_bit / 8};
     struct Coord result_pos = {7 - result_bit % 8, 7 - result_bit / 8};
 
-    uint8_t index = __builtin_ctzll(board->by_piece[(move->i / 6)*6 + KING]);
+    uint8_t index = __builtin_ctzll(board->by_piece[(color)*6 + KING]);
     struct Coord king_pos = INDEX_TO_POS(index);
-    uint64_t king_mask = check_king_move_threats(board, &king_pos, (uint8_t)(move->i / 6));
+    uint64_t king_mask = check_king_move_threats(board, &king_pos, (uint8_t)(color));
+
+    uint8_t is_castle = 0;
 
     if (move->i % 6 != KING)
     {
-        make_move_no_check(board, move);
+        struct Board test_board = make_temp_move(board, move);
 
-        if (square_attacked(board, &king_pos, !(move->i / 6)))
+        if (square_attacked(&test_board, &king_pos, !(color)))
         {
-            unmake_move(board, move);
+            return 0;
+        }
+    }
+    else
+    {
+        uint8_t is_qs_castle = (GET_BOOL(board->castling_rights, (color)*2) && move->result & (wqs_castle.result | bqs_castle.result));
+        uint8_t is_ks_castle = (GET_BOOL(board->castling_rights, (color)*2+1) && move->result & (wks_castle.result | bks_castle.result));
+        uint64_t mask = 0;
+        // check squares between
+
+        if (is_qs_castle)
+        {
+            mask = 0b01110000ULL << (color)*56;
+        }
+        else if (is_ks_castle)
+        {
+            mask = 0b00000110ULL << (color)*56;
+        }
+
+        if (!(mask & (board->white_pieces | board->black_pieces)) && !square_attacked(board, &INDEX_TO_POS(__builtin_ctzll(move->initial)), !(color)))
+        {
+            struct Board test_board = make_temp_move(board, move);
+            // no obstructions
+            while (mask)
+            {
+                struct Coord pos;
+                pop_lsb(&mask, &pos);
+                if (square_attacked(&test_board, &pos, !color))
+                {
+                    return 0;
+                }
+            }
+        }
+        else
+        {
             return 0;
         }
 
-        unmake_move(board, move);
+        is_castle = is_ks_castle || is_qs_castle;
     }
 
     switch (move->i % 6)
     {
         case ROOK:
-            return (ROOK_PURE(initial_pos, result_pos) && (move->result & get_all_rook_moves_obstacles(board, &initial_pos, move->i / 6)));
+            return (ROOK_PURE(initial_pos, result_pos) && (move->result & get_all_rook_moves_obstacles(board, &initial_pos, color)));
         case BISHOP:
-            return (BISHOP_PURE(initial_pos, result_pos) && (move->result & get_all_bishop_moves_obstacles(board, &initial_pos, move->i / 6)));
+            return (BISHOP_PURE(initial_pos, result_pos) && (move->result & get_all_bishop_moves_obstacles(board, &initial_pos, color)));
         case QUEEN:
-            return ((ROOK_PURE(initial_pos, result_pos) || BISHOP_PURE(initial_pos, result_pos)) && (move->result & (get_all_rook_moves_obstacles(board, &initial_pos, move->i / 6) | get_all_bishop_moves_obstacles(board, &initial_pos, move->i / 6))));
+            return ((ROOK_PURE(initial_pos, result_pos) || BISHOP_PURE(initial_pos, result_pos)) && (move->result & (get_all_rook_moves_obstacles(board, &initial_pos, color) | get_all_bishop_moves_obstacles(board, &initial_pos, color))));
         case KING:
-            return (move->result & king_mask) != 0;
+            return (move->result & king_mask) != 0 || is_castle;
         case KNIGHT:
             return KNIGHT_PURE(initial_pos, result_pos);
         case PAWN:
             printf("Pawn!\n");
-            {uint8_t color = (uint8_t)(move->i / 6);
+            {
             uint64_t enemy_pieces = color ? board->white_pieces : board->black_pieces;
-            return (((get_all_pawn_attacks(&initial_pos, move->i / 6) & enemy_pieces) | get_all_pawn_moves(board, &initial_pos, color)) & move->result) != 0;};
+            return (((get_all_pawn_attacks(&initial_pos, color) & enemy_pieces) | get_all_pawn_moves(board, &initial_pos, color)) & move->result) != 0;};
         default:
             return 0;
     }
@@ -515,13 +610,13 @@ void make_move(struct Board* board, struct Move* move)
         return;
     }
 
-    make_move_no_check(board, move);
+    make_temp_move_ip(board, move);
 }
 
 void unmake_move(struct Board* board, struct Move* move)
 {
     struct Move inverse_move = {move->i, move->result, move->initial, -1};
-    make_move_no_check(board, &inverse_move);
+    make_temp_move_ip(board, &inverse_move);
     if (move->attack_index >= 0)
     {
         board->by_piece[move->attack_index] |= move->result;

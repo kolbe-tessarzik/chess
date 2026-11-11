@@ -38,12 +38,13 @@ class Coord(ctypes.Structure):
 
 class Board(ctypes.Structure):
     def copy(self):
-        return Board(tuple(self.by_piece), self.white_pieces, self.black_pieces)
+        return Board(tuple(self.by_piece), self.white_pieces, self.black_pieces, self.castling_rights)
 
     _fields_ = [
         ("by_piece", ctypes.c_uint64 * 12),
         ("white_pieces", ctypes.c_uint64),
         ("black_pieces", ctypes.c_uint64),
+        ("castling_rights", ctypes.c_uint8),
     ]
 
 class Move(ctypes.Structure):
@@ -86,6 +87,7 @@ INITIAL_SETUP = Board(
     ),
     white_pieces=0x000000000000FFFF,
     black_pieces=0xFFFF000000000000,
+    castling_rights=0b1111,
 )
 
 def color_of(i):
