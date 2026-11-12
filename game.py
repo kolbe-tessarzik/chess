@@ -39,6 +39,8 @@ if __name__ == "__main__":
 
     screen = pg.display.set_mode((800, 800))
 
+    clock = pg.time.Clock()
+
     running = True
     while running:
         for event in pg.event.get():
@@ -58,3 +60,4 @@ if __name__ == "__main__":
             break
         game.draw(screen)
         pg.display.flip()
+        clock.tick(60)
