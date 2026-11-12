@@ -149,10 +149,16 @@ uint64_t mask_rows_left(uint8_t up_to) {
 #define ROOK_NS_PURE(x) (UINT64_C(0x0101010101010101) << (7 - (x)))
 #define ROOK_EW_PURE(y) (UINT64_C(0xFF) << ((7 - (y)) * 8))
 
-void pop_lsb(uint64_t* num, struct Coord* pos)
+uint8_t pop_lsb(uint64_t* num)
 {
     uint8_t i = __builtin_ctzll(*num);
     *num &= *num - 1;
+    return i;
+}
+
+void pop_lsb_pos(uint64_t* num, struct Coord* pos)
+{
+    uint8_t i = pop_lsb(num);
     *pos = INDEX_TO_POS(i);
 }
 
@@ -347,7 +353,7 @@ uint8_t square_attacked(struct Board *board, struct Coord *test_pos, enum Color 
         while (remaining)
         {
             struct Coord attacker_pos;
-            pop_lsb(&remaining, &attacker_pos);
+            pop_lsb_pos(&remaining, &attacker_pos);
             // must be king, all other pieces handled above
             if (KING_PURE(attacker_pos, *test_pos))
             {
@@ -565,7 +571,7 @@ uint8_t check_move(struct Board* board, struct Move* move)
             while (mask)
             {
                 struct Coord pos;
-                pop_lsb(&mask, &pos);
+                pop_lsb_pos(&mask, &pos);
                 if (square_attacked(&test_board, &pos, !color))
                 {
                     return 0;

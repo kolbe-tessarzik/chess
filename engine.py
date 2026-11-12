@@ -1,13 +1,13 @@
 import ctypes
-from enum import Enum
+from enum import Enum, IntEnum
 
 lib = ctypes.CDLL('./engine.dylib')
 
-class Color(Enum):
+class Color(IntEnum):
     WHITE = 0
     BLACK = 1
 
-class PieceType(Enum):
+class PieceType(IntEnum):
     PAWN   = 0
     KING   = 1
     QUEEN  = 2
@@ -15,7 +15,7 @@ class PieceType(Enum):
     KNIGHT = 4
     ROOK   = 5
 
-class ColoredPiece(Enum):
+class ColoredPiece(IntEnum):
     WHITE_PAWN   = 0
     WHITE_KING   = 1
     WHITE_QUEEN  = 2

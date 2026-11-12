@@ -1,5 +1,6 @@
 import pygame as pg # pyright: ignore[reportMissingImports]
 from board import Board, Game, Color, Player
+import bot
 
 class HumanPlayer(Player):
     def __init__(self, color: Color):
@@ -34,7 +35,7 @@ class HumanPlayer(Player):
 
 if __name__ == "__main__":
 
-    game = Game(players=(HumanPlayer(Color.WHITE), HumanPlayer(Color.BLACK)))
+    game = Game(players=(HumanPlayer(Color.WHITE), bot.Bot(Color.BLACK)))
 
     screen = pg.display.set_mode((800, 800))
 
